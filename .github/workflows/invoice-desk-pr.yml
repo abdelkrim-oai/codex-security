@@ -9,8 +9,8 @@ permissions:
 
 env:
   CODEX_SECURITY_VERSION: '0.6.0'
-  CODEX_SECURITY_MODEL: ${{ vars.CODEX_SECURITY_MODEL || 'gpt-6-astra' }}
-  CODEX_SECURITY_CYBER_PROGRAM: ${{ vars.CODEX_SECURITY_CYBER_PROGRAM || 'daybreak_blue' }}
+  CODEX_SECURITY_MODEL: 'gpt-6-sol'
+  CODEX_SECURITY_CYBER_PROGRAM: 'daybreak_blue'
 
 concurrency:
   group: invoice-desk-pr-${{ github.event.pull_request.number }}
