@@ -13,7 +13,6 @@ import {
   HttpError,
   addComment,
   approveInvoice,
-  getInvoice,
   listInvoices,
   ownedInvoice,
   previewInvoice,
@@ -238,7 +237,7 @@ export function createApp() {
       if (invoice) {
         const [, id, action] = invoice;
         if (method === "GET" && !action)
-          return respond(response, 200, getInvoice(store, id));
+          return respond(response, 200, ownedInvoice(store, user, id));
         if (method === "PATCH" && !action)
           return respond(
             response,
