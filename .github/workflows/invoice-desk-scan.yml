@@ -23,6 +23,7 @@ jobs:
     name: Invoice Desk full scan
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -31,15 +32,18 @@ jobs:
           path: source
           fetch-depth: 0
           persist-credentials: false
+
       - name: Set up Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
           package-manager-cache: false
+
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
+
       - name: Prepare isolated Invoice Desk source
         id: source
         env:
@@ -49,9 +53,11 @@ jobs:
           python3 "$SOURCE_REPO/.github/scripts/prepare-invoice-desk-demo.py"
           # Remove sample guides, answer keys and repository context before inference.
           rm -rf -- "$SOURCE_REPO"
+
       - name: No Invoice Desk changes
         if: steps.source.outputs.changed != 'true'
         run: echo 'No Invoice Desk application changes; no model call was needed.' >> "$GITHUB_STEP_SUMMARY"
+
       - name: Install pinned Codex Security CLI
         if: steps.source.outputs.changed == 'true'
         working-directory: ${{ runner.temp }}
@@ -59,6 +65,23 @@ jobs:
           npm install --prefix "$RUNNER_TEMP/codex-security-cli" \
             --ignore-scripts --no-audit --no-fund \
             "@openai/codex-security@$CODEX_SECURITY_VERSION"
+
+      - name: Prepare Bubblewrap sandbox
+        if: steps.source.outputs.changed == 'true'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo /bin/sh -eu <<'SH'
+          if [ -d /etc/needrestart/conf.d ]; then
+            override=$(mktemp /etc/needrestart/conf.d/codex-security-XXXXXX.conf)
+            trap 'rm -f "$override"' EXIT
+            trap 'exit 1' HUP INT TERM
+            printf '%s\n' '$nrconf{override_rc}{qr(^php8\.3-fpm\.service$)} = 0;' > "$override"
+          fi
+          apt-get install --yes bubblewrap apparmor-profiles
+          SH
+          sudo apparmor_parser -r /usr/share/apparmor/extra-profiles/bwrap-userns-restrict
+
       - name: Scan Invoice Desk
         id: security
         if: steps.source.outputs.changed == 'true'
@@ -73,22 +96,29 @@ jobs:
             echo '::error::Add the OPENAI_API_KEY Actions secret in this repository.'
             exit 2
           fi
+
           cli="$RUNNER_TEMP/codex-security-cli/node_modules/.bin/codex-security"
           reports="$RUNNER_TEMP/invoice-desk-reports"
+
           args=(scan . --provider openai --auth api-key --mode standard
                 --model "$CODEX_SECURITY_MODEL" --effort high
                 --cyber-access-program "$CODEX_SECURITY_CYBER_PROGRAM"
                 --headless --format json --output-dir "$reports/scan")
+
           if [[ -n "$DIFF_BASE" ]]; then
             args+=(--diff "$DIFF_BASE" --head HEAD --fail-on-severity high)
           fi
+
           scan_exit=0
           "$cli" "${args[@]}" > "$reports/result.json" || scan_exit=$?
+
           echo "exit_code=$scan_exit" >> "$GITHUB_OUTPUT"
           echo "Codex Security exit code: $scan_exit (0: passed, 1: severity threshold, 2: execution error)." >> "$GITHUB_STEP_SUMMARY"
+
           if [[ "$scan_exit" -ne 0 && "$scan_exit" -ne 1 ]]; then
             exit "$scan_exit"
           fi
+
           # A green check requires a completed scan and its required report.
           python3 - "$reports/scan/scan-manifest.json" <<'PYTHON'
           import json, sys
@@ -97,10 +127,12 @@ jobs:
           if manifest['scan']['status'] != 'completed':
               raise SystemExit('Security analysis did not complete.')
           PYTHON
+
           test -s "$reports/scan/report.md"
           cat "$reports/scan/report.md" >> "$GITHUB_STEP_SUMMARY"
           "$cli" export "$reports/scan" --source-root . --output "$reports/findings.sarif"
           exit "$scan_exit"
+
       - name: Upload scan reports
         if: ${{ !cancelled() && (steps.security.outputs.exit_code == '0' || steps.security.outputs.exit_code == '1') }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
